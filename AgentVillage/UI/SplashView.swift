@@ -14,6 +14,7 @@ struct RootView: View {
                 SplashView(ready: showGame) { splashDone = true }
             }
         }
+        .onOpenURL { DeepLink.shared.receive($0) }
         .task {
             // Generate the heavy map art in the background while the splash animates,
             // then build the scene (which is quick once the art is cached).

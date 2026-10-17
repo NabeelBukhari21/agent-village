@@ -674,6 +674,13 @@ final class WorldModel {
         celebrate(a)
     }
 
+    /// Keeps a finished task's answer readable without replaying the celebration
+    /// (e.g. when a push alert opens a report the app missed while closed).
+    func storeResult(_ agentID: String, serverID: String, title: String, text: String) {
+        guard !results.contains(where: { $0.id == serverID }) else { return }
+        results.insert(LiveResult(id: serverID, agentID: agentID, title: title, text: text, date: Date()), at: 0)
+    }
+
     func liveFailed(_ agentID: String, serverID: String, text: String) {
         guard let a = agent(agentID) else { return }
         a.queue.removeAll { $0.serverID == serverID }

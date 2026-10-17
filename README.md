@@ -78,6 +78,12 @@ python3 server/village_server.py
 
 Then in the app: **MENU → YOUR MAC**, enter the address and pairing code it prints, and tap **CONNECT**. The HUD switches to **LIVE ON MAC**.
 
+### Phone push (free, works with the app closed)
+
+iOS pauses the app in the background, and Apple push needs a paid developer account, so the server can instead send alerts through [ntfy](https://ntfy.sh) (free, open source). In the app: **MENU → PHONE PUSH → TURN ON**, install the free **ntfy** app, tap **+** and subscribe to the topic shown (server `ntfy.sh`). Approvals (high priority), finished and failed quests then reach your phone even when Agent Village is closed; tapping one opens the app at that agent or report (`agentvillage://open?task=…`).
+
+Only the agent's name and the task title are sent — never proposals, results, email contents or the pairing code. The topic is random and stored in `~/AgentVillageServer/ntfy.topic`; anyone who knows it can read the alert titles, so keep it private (delete the file and restart the server for a new one). API: `GET/POST /api/push` with `{"enabled": true}` or `{"test": true}`.
+
 ## Status & roadmap
 
 - [x] Pixel-art village, HUD and dashboard

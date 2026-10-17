@@ -372,6 +372,7 @@ struct MenuPanel: View {
         PixelPanel(title: "MENU", icon: "gear", onClose: onClose) {
             VStack(alignment: .leading, spacing: 5 * ps.ui) {
                 MacConnectSection(link: link)
+                if link.isConnected { PhonePushSection(link: link) }
                 row("music", "MUSIC", music ? "ON" : "OFF") {
                     music.toggle(); Chiptune.shared.setMusic(music)
                 }
@@ -487,6 +488,89 @@ struct MacConnectSection: View {
             .padding(.horizontal, 6 * ps.ui)
             .padding(.vertical, 4 * ps.ui)
             .pixelWindow(top: 0x0F1030, bottom: 0x0F1030)
+    }
+}
+
+// MARK: Phone push (ntfy)
+
+/// Free phone alerts via the open-source ntfy app: the Mac posts to a private
+/// topic, so alerts arrive even when Agent Village is closed.
+struct PhonePushSection: View {
+    let link: LiveLink
+    @Environment(\.pixelScale) private var ps
+    @State private var busy = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4 * ps.ui) {
+            HStack(spacing: 3 * ps.ui) {
+                PixelIcon(name: "bell")
+                PixelText(text: "PHONE PUSH", color: 0xFFD23F)
+                Spacer()
+                if let p = link.push {
+                    PixelText(text: p.enabled ? "ON" : "OFF", color: p.enabled ? 0x7DFFA8 : 0xFF9EB0)
+                }
+            }
+            PixelParagraph(text: "Get alerts on your phone even when Agent Village is closed. Free, using the ntfy app.",
+                           maxWidth: 300, color: 0xC9D2FF, size: ps.small)
+            if let p = link.push {
+                if p.enabled {
+                    PixelParagraph(text: "1. Install the free \"ntfy\" app from the App Store.",
+                                   maxWidth: 300, color: 0x9AA3D6, size: ps.small)
+                    PixelParagraph(text: "2. In ntfy tap + and subscribe to this topic (server ntfy.sh):",
+                                   maxWidth: 300, color: 0x9AA3D6, size: ps.small)
+                    Text(p.topic)
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 6 * ps.ui)
+                        .padding(.vertical, 4 * ps.ui)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .pixelWindow(top: 0x0F1030, bottom: 0x0F1030)
+                    HStack(spacing: 4 * ps.ui) {
+                        PixelActionButton(title: copied ? "COPIED" : "COPY TOPIC", icon: "scroll") { copy(p.topic) }
+                        PixelActionButton(title: "SEND TEST", icon: "bell", disabled: busy) { update(test: true) }
+                    }
+                    PixelParagraph(text: "3. Tapping an alert opens Agent Village. Keep the topic private: anyone with it can see alert titles (agent + task name only).",
+                                   maxWidth: 300, color: 0x6A6F96, size: ps.small)
+                    if let err = p.lastError {
+                        PixelParagraph(text: "Last alert failed: \(err)", maxWidth: 300, color: 0xFF9EB0, size: ps.small)
+                    } else if p.lastStatus == 200 {
+                        PixelText(text: "Last alert delivered to ntfy.", color: 0x7DFFA8, shadow: nil, size: ps.small)
+                    }
+                    PixelActionButton(title: "TURN OFF", icon: "cross", style: .bad, disabled: busy) { update(enabled: false) }
+                } else {
+                    PixelActionButton(title: "TURN ON", icon: "check", style: .good, disabled: busy) { update(enabled: true) }
+                }
+            } else {
+                PixelText(text: "Checking your Mac...", color: 0x9AA3D6, shadow: nil, size: ps.small)
+            }
+        }
+        .padding(5 * ps.ui)
+        .background(Color(hex: 0x0C0818, opacity: 0.35))
+        .task { await link.loadPush() }
+    }
+
+    private func update(enabled: Bool? = nil, test: Bool = false) {
+        busy = true
+        Task {
+            await link.setPush(enabled: enabled, test: test)
+            if test {
+                try? await Task.sleep(for: .seconds(2))  // the Mac sends in the background
+                await link.loadPush()
+            }
+            busy = false
+        }
+    }
+
+    private func copy(_ s: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = s
+        #else
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+        #endif
+        copied = true
     }
 }
 

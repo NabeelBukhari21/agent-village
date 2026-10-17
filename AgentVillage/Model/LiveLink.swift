@@ -34,6 +34,8 @@ final class LiveLink {
     var code: String
     /// Which address is in use right now.
     var via: String = ""
+    /// Phone push (ntfy) settings from the Mac, once loaded.
+    var push: PushInfo?
 
     @ObservationIgnored private let model: WorldModel
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -202,6 +204,24 @@ final class LiveLink {
         post("/api/tasks/\(id)/\(approve ? "approve" : "deny")", body: [:])
     }
 
+    /// A task's full details (used to open a finished report from a push alert).
+    func task(_ id: String) async -> ServerTask? {
+        try? await get("/api/tasks/\(id)")
+    }
+
+    // MARK: Phone push (ntfy)
+
+    func loadPush() async {
+        push = try? await get("/api/push")
+    }
+
+    func setPush(enabled: Bool? = nil, test: Bool = false) async {
+        var body: [String: Any] = [:]
+        if let enabled { body["enabled"] = enabled }
+        if test { body["test"] = true }
+        if let info: PushInfo = try? await send("/api/push", body: body) { push = info }
+    }
+
     // MARK: HTTP
 
     enum LinkError: Error {
@@ -243,6 +263,18 @@ final class LiveLink {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    private func send<T: Decodable>(_ path: String, body: [String: Any]) async throws -> T {
+        guard let u = url(path) else { throw LinkError.server("Invalid Mac address.") }
+        var req = URLRequest(url: u)
+        req.httpMethod = "POST"
+        req.setValue(code, forHTTPHeaderField: "X-Village-Token")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await session.data(for: req)
+        if (resp as? HTTPURLResponse)?.statusCode == 401 { throw LinkError.unauthorized }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
     private func post(_ path: String, body: [String: Any]) {
         guard let u = url(path) else { return }
         var req = URLRequest(url: u)
@@ -275,6 +307,14 @@ struct ServerTask: Decodable {
     let proposal: String?
     let result: String?
     let tokens: Int?
+}
+
+struct PushInfo: Decodable {
+    let enabled: Bool
+    let topic: String
+    let server: String
+    let lastStatus: Int?
+    let lastError: String?
 }
 
 private struct ServerEvent: Decodable {

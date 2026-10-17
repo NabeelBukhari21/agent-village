@@ -30,7 +30,8 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 PORT = int(os.environ.get("VILLAGE_PORT", "8787"))
 HOME = Path.home()
@@ -39,6 +40,9 @@ WORKSPACE = DATA / "workspace"
 REPORTS = DATA / "reports"
 STATE_FILE = DATA / "tasks.json"
 TOKEN_FILE = DATA / "pairing.token"
+PUSH_TOPIC_FILE = DATA / "ntfy.topic"
+PUSH_CONF_FILE = DATA / "push.json"
+NTFY_SERVER = os.environ.get("VILLAGE_NTFY_SERVER", "https://ntfy.sh").rstrip("/")
 CLAUDE = shutil.which("claude") or "/opt/homebrew/bin/claude"
 
 # ---------------------------------------------------------------------------
@@ -156,6 +160,8 @@ def emit(kind: str, task: dict | None = None, **extra) -> None:
         events.append(e)
         del events[:-500]
         changed.notify_all()
+    if task and kind in PUSH_KINDS:
+        push(kind, task)
 
 
 def public(t: dict, full: bool = False) -> dict:
@@ -208,6 +214,72 @@ def create_task(agent: str, prompt: str, needs_approval: bool) -> dict:
     emit("task_created", t)
     wakeups[agent].set()
     return t
+
+
+# ---------------------------------------------------------------------------
+# Phone push via ntfy (free): alerts reach the phone even when the app is closed
+# ---------------------------------------------------------------------------
+
+PUSH_KINDS = ("approval_needed", "task_done", "task_failed")
+push_state = {"lastStatus": None, "lastError": None, "lastTime": None}
+
+
+def push_enabled() -> bool:
+    try:
+        return bool(json.loads(PUSH_CONF_FILE.read_text()).get("enabled"))
+    except (OSError, ValueError):
+        return False
+
+
+def push_topic() -> str:
+    """A random, unguessable ntfy topic — anyone who knows it can read the alerts."""
+    if not PUSH_TOPIC_FILE.exists():
+        alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
+        PUSH_TOPIC_FILE.write_text("village-" + "".join(secrets.choice(alphabet) for _ in range(22)))
+        PUSH_TOPIC_FILE.chmod(0o600)
+    return PUSH_TOPIC_FILE.read_text().strip()
+
+
+def set_push(enabled: bool) -> None:
+    PUSH_CONF_FILE.write_text(json.dumps({"enabled": enabled}))
+    PUSH_CONF_FILE.chmod(0o600)
+
+
+def push(kind: str, task: dict | None) -> None:
+    """Send a short alert to ntfy. Privacy: only the agent's name and the task title
+    ever leave the Mac — never proposals, results, email contents or the pairing code."""
+    if task is not None and not push_enabled():
+        return
+    name = AGENTS.get(task["agent"], {}).get("name", "An agent") if task else "Agent Village"
+    title = task["title"] if task else ""
+    msg = {
+        "approval_needed": (f"{name} needs your approval", title, ["bell"], 4),
+        "task_done": (f"{name} finished a quest", title, ["white_check_mark"], 3),
+        "task_failed": (f"{name} couldn't finish", title, ["x"], 3),
+        "test": ("Agent Village", "Test alert: phone push is working!", ["tada"], 3),
+    }[kind]
+    link = "agentvillage://open"
+    if task:
+        link += "?" + urlencode({"task": task["id"], "agent": task["agent"]})
+    body = {"topic": push_topic(), "title": msg[0], "message": msg[1] or msg[0], "tags": msg[2],
+            "priority": msg[3], "click": link}
+    threading.Thread(target=send_push, args=(body,), daemon=True).start()
+
+
+def send_push(body: dict) -> None:
+    req = Request(NTFY_SERVER, data=json.dumps(body).encode(), method="POST",
+                  headers={"Content-Type": "application/json", "User-Agent": "AgentVillage/1.0"})
+    try:
+        with urlopen(req, timeout=15) as resp:
+            push_state.update(lastStatus=resp.status, lastError=None, lastTime=now())
+    except Exception as ex:
+        push_state.update(lastStatus=getattr(ex, "code", None), lastError=str(ex)[:200], lastTime=now())
+        print("Push failed:", ex)
+
+
+def push_info() -> dict:
+    return {"enabled": push_enabled(), "topic": push_topic(), "server": NTFY_SERVER,
+            "subscribeURL": f"{NTFY_SERVER}/{push_topic()}", **push_state}
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +514,8 @@ class Handler(BaseHTTPRequestHandler):
                     changed.wait(timeout=max(0.1, deadline - time.time()))
                 out = [e for e in events if e["seq"] > after]
             return self.send_json({"seq": seq, "events": out})
+        if url.path == "/api/push":
+            return self.send_json(push_info())
         m = re.fullmatch(r"/api/tasks/([0-9a-f]+)", url.path)
         if m and m.group(1) in tasks:
             return self.send_json(public(tasks[m.group(1)], full=True))
@@ -457,6 +531,12 @@ class Handler(BaseHTTPRequestHandler):
             if agent not in AGENTS or not prompt:
                 return self.send_json({"error": "Need a valid agent and prompt"}, HTTPStatus.BAD_REQUEST)
             return self.send_json(public(create_task(agent, prompt, bool(data.get("needsApproval")))))
+        if url.path == "/api/push":
+            if "enabled" in data:
+                set_push(bool(data["enabled"]))
+            if data.get("test"):
+                push("test", None)
+            return self.send_json(push_info())
         m = re.fullmatch(r"/api/tasks/([0-9a-f]+)/(approve|deny|cancel)", url.path)
         if m and m.group(1) in tasks:
             t = tasks[m.group(1)]

@@ -59,11 +59,15 @@ struct GameView: View {
                 Chiptune.shared.start()
                 SystemNotifier.shared.attach(model)
                 link.autoConnect()
+                openDeepLink()
             }
         }
         .background(Color(hex: 0x24452C))
         .onChange(of: scenePhase) { _, phase in SystemNotifier.shared.appActive = phase == .active }
-        .onChange(of: model.isLive) { _, live in if live { SystemNotifier.shared.requestPermissionIfNeeded() } }
+        .onChange(of: model.isLive) { _, live in
+            if live { SystemNotifier.shared.requestPermissionIfNeeded(); openDeepLink() }
+        }
+        .onChange(of: DeepLink.shared.pending) { _, _ in openDeepLink() }
     }
 
     // MARK: Layouts
@@ -211,6 +215,37 @@ struct GameView: View {
             panel = .menu
         default:
             if let id = n.agentID { panel = nil; select(id) }
+        }
+    }
+
+    /// Opens what a phone push alert points at: the agent waiting on that task, or its report.
+    private func openDeepLink() {
+        guard let target = DeepLink.shared.pending else { return }
+        if let tid = target.taskID, let a = model.agents.first(where: { $0.task?.serverID == tid }) {
+            DeepLink.shared.pending = nil
+            select(a.id)
+        } else if let tid = target.taskID, model.results.contains(where: { $0.id == tid }) {
+            DeepLink.shared.pending = nil
+            model.selectedID = nil
+            panel = .report(tid)
+        } else if link.isConnected, let tid = target.taskID {
+            DeepLink.shared.pending = nil
+            Task {
+                let t = await link.task(tid)
+                if let t, t.status == "done", let text = t.result {
+                    model.storeResult(t.agent, serverID: t.id, title: t.title, text: text)
+                    model.selectedID = nil
+                    panel = .report(t.id)
+                } else if let agentID = t?.agent ?? target.agentID {
+                    select(agentID)
+                }
+            }
+        } else if let agentID = target.agentID {
+            // Still connecting: show the agent now; the task opens once the Mac answers.
+            if model.selectedID != agentID { select(agentID) }
+            if target.taskID == nil { DeepLink.shared.pending = nil }
+        } else {
+            DeepLink.shared.pending = nil
         }
     }
 
