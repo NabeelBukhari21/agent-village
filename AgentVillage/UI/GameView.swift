@@ -4,6 +4,7 @@ import SwiftUI
 struct GameView: View {
     @State private var model: WorldModel
     @State private var game: VillageGame
+    @State private var link: LiveLink
     @State private var panel: DashPanel?
     @State private var questAgentID = "hana"
     @State private var lastDrag: CGSize = .zero
@@ -18,6 +19,7 @@ struct GameView: View {
         let model = WorldModel()
         _model = State(initialValue: model)
         _game = State(initialValue: VillageGame(model: model))
+        _link = State(initialValue: LiveLink(model: model))
     }
 
     var body: some View {
@@ -54,6 +56,7 @@ struct GameView: View {
                 game.size = geo.size
                 game.setDefaultZoom(viewSize: geo.size)
                 Chiptune.shared.start()
+                link.autoConnect()
             }
         }
         .background(Color(hex: 0x24452C))
@@ -107,7 +110,7 @@ struct GameView: View {
             HStack(alignment: .bottom) {
                 Spacer()
                 if let a = model.selected {
-                    DialogueWindow(agent: a, model: model, width: 720, onNewQuest: openQuest, onClose: { select(nil) })
+                    DialogueWindow(agent: a, model: model, width: 720, onNewQuest: openQuest, onRead: { id in model.selectedID = nil; panel = .report(id) }, onClose: { select(nil) })
                         .id(a.id)
                         .frame(maxWidth: 720)
                         .hudRegion()
@@ -129,7 +132,7 @@ struct GameView: View {
     @ViewBuilder
     private func bottom(size: CGSize) -> some View {
         if let a = model.selected {
-            DialogueWindow(agent: a, model: model, width: size.width - 20, onNewQuest: openQuest, onClose: { select(nil) })
+            DialogueWindow(agent: a, model: model, width: size.width - 20, onNewQuest: openQuest, onRead: { id in model.selectedID = nil; panel = .report(id) }, onClose: { select(nil) })
                 .id(a.id)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
         } else if let panel {
@@ -157,11 +160,12 @@ struct GameView: View {
     @ViewBuilder
     private func panelView(_ p: DashPanel) -> some View {
         switch p {
-        case .log: LogPanel(model: model) { panel = nil }
+        case .log: LogPanel(model: model, onRead: { panel = .report($0) }) { panel = nil }
+        case .report(let id): ReportPanel(model: model, resultID: id) { panel = .log }
         case .inbox: InboxPanel(model: model, onGoTo: { id in panel = nil; select(id) }) { panel = nil }
         case .quest: NewQuestPanel(model: model, agentID: $questAgentID) { panel = nil }
         case .stats: StatsPanel(model: model) { panel = nil }
-        case .menu: MenuPanel(model: model, onRecenter: { panel = nil; select(nil); game.recenter() }) { panel = nil }
+        case .menu: MenuPanel(model: model, link: link, onRecenter: { panel = nil; select(nil); game.recenter() }) { panel = nil }
         }
     }
 

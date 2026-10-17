@@ -46,14 +46,39 @@ Everything is generated in code — there are no image or audio asset files besi
 - **Simulation model** (`Model/`) — agent state machine (rest → walk → work → ask for approval → celebrate), waypoint routing around the plaza, encounters, quest queues and an event feed.
 - `_archive_3d/` keeps the first prototype, a 3D RealityKit version of the village, before the project moved to pixel art.
 
+## Real agents (Village Server)
+
+The app can drive **real AI agents running on your Mac**. `server/village_server.py` (Python standard library only) runs each task with the **Claude Code CLI in headless mode**, so the agents use your Claude Code subscription — no API key or extra cost.
+
+| Agent | What it really does | Tools |
+|---|---|---|
+| **Hana** | Reads, summarizes and drafts Gmail | Gmail via Claude's MCP connector |
+| **Ren** | Runs tasks on your Mac: disk/battery checks, finding big files, organizing folders, scripts | Shell & files (read-only until approved) |
+| **Yuki** | Web research with sources | Web search & fetch |
+| **Kaito** | Analyzes files, folders and data on your Mac | Files, read-only shell, Python after approval |
+
+**Safety:** agents plan with read-only permissions. Anything irreversible — sending email, changing files, running commands that modify the system — makes the agent stop and request approval. The villager walks to the Quest Board, you approve or deny in the Inbox, and only then does the server resume the same Claude session with broader permissions. `sudo` and destructive disk commands are always blocked.
+
+**How it connects:** the phone finds the server on your Wi-Fi via Bonjour and authenticates with a pairing code. Progress streams over a long-poll event API, and each tool call becomes a speech bubble ("Searching: ...", "Reading your inbox...").
+
+### Run it
+
+```bash
+claude            # once: run /login with your Claude account
+python3 server/village_server.py
+```
+
+Then in the app: **MENU → YOUR MAC**, enter the address and pairing code it prints, and tap **CONNECT**. The HUD switches to **LIVE ON MAC**.
+
 ## Status & roadmap
 
-- [x] Pixel-art village, HUD and dashboard (agents currently run on simulated tasks)
+- [x] Pixel-art village, HUD and dashboard
 - [x] Approvals inbox, custom quests, stats, quest log
-- [ ] **Real agents**: a local "Village Server" on the Mac that runs Claude Code agents (web research, Gmail via MCP, local Mac tasks) and streams their progress to the app
-- [ ] Control your Mac from your phone, from anywhere
+- [x] Real agents via a local Claude Code server: web research, Gmail, Mac tasks, with approvals
+- [x] Live mode in the app: villagers act out real progress; readable reports
+- [ ] Reach your Mac from anywhere (Tailscale) and auto-start the server at login
 
-## Running it
+## Running the app
 
 Open `AgentVillage.xcodeproj` in Xcode, pick an iPhone simulator, your own iPhone, or *My Mac*, and press Run. Requires Xcode 26+ (iOS 26 / macOS 26).
 

@@ -44,6 +44,16 @@ struct FeedEntry: Identifiable {
     let agentID: String
     let text: String
     let kind: Kind
+    var resultID: String? = nil
+}
+
+/// A finished real task's full answer, readable in the app.
+struct LiveResult: Identifiable {
+    let id: String
+    let agentID: String
+    let title: String
+    let text: String
+    let date: Date
 }
 
 private enum Arrival { case work, approval, rest }
@@ -134,6 +144,13 @@ final class WorldModel {
     let dayLength: Double = 300
 
     @ObservationIgnored private var paused = false
+
+    // Live mode: agents are driven by real tasks on the Mac server.
+    var isLive = false
+    var results: [LiveResult] = []
+    @ObservationIgnored var onLiveCreate: ((AgentState, String, Bool) -> Void)?
+    @ObservationIgnored var onLiveDecision: ((String, Bool) -> Void)?
+    @ObservationIgnored var onLiveCancel: ((String) -> Void)?
     /// Hook for sound effects and visual bursts.
     @ObservationIgnored var onEvent: ((GameEvent) -> Void)?
 
@@ -167,6 +184,15 @@ final class WorldModel {
 
     func approve(_ agent: AgentState) {
         guard agent.mode == .awaitingApproval else { return }
+        if isLive, let sid = agent.task?.serverID {
+            approvalsGranted += 1
+            say(agent, "Yatta! On it!", .shout, for: 2.5)
+            log(agent.id, "Approved: \(agent.task?.title ?? "")", .info)
+            onEvent?(.approved(agent.id))
+            onLiveDecision?(sid, true)
+            walk(agent, to: agent.persona.station, then: .work)
+            return
+        }
         agent.approved = true
         approvalsGranted += 1
         say(agent, "Yatta! On it!", .shout, for: 2.5)
@@ -177,6 +203,7 @@ final class WorldModel {
 
     func deny(_ agent: AgentState) {
         guard agent.mode == .awaitingApproval else { return }
+        if isLive, let sid = agent.task?.serverID { onLiveDecision?(sid, false) }
         say(agent, "Okay... I'll scrap that one.", .speech, for: 3)
         agent.expression = .sad
         approvalsDenied += 1
@@ -190,6 +217,11 @@ final class WorldModel {
     // MARK: Player quests
 
     func enqueue(_ task: AgentTask, for agent: AgentState) {
+        if isLive {
+            onLiveCreate?(agent, task.title, task.approvalPrompt != nil)
+            say(agent, "Got it! Sending that to my desk!", .shout, for: 3)
+            return
+        }
         agent.queue.append(task)
         log(agent.id, "New quest from you: \(task.title)", .info)
         say(agent, "Got it! I'll do \"\(task.title)\" next!", .shout, for: 3)
@@ -197,6 +229,7 @@ final class WorldModel {
     }
 
     func removeFromQueue(_ taskID: UUID, of agent: AgentState) {
+        if isLive, let sid = agent.queue.first(where: { $0.id == taskID })?.serverID { onLiveCancel?(sid) }
         agent.queue.removeAll { $0.id == taskID }
     }
 
@@ -266,8 +299,10 @@ final class WorldModel {
         case .resting:
             a.speed = 0
             a.timer -= dt
-            if !a.queue.isEmpty { a.timer = min(a.timer, 1) }
-            if a.timer <= 0 { startNextTask(a) }
+            if !a.queue.isEmpty, !isLive { a.timer = min(a.timer, 1) }
+            if a.timer <= 0 {
+                if isLive { a.timer = Double.random(in: 6...12) } else { startNextTask(a) }
+            }
             else if a.timer < 2.5, a.bubble == nil, Int.random(in: 0..<400) == 0 {
                 say(a, a.persona.idleLines.randomElement()!, .thought, for: 2.5)
             }
@@ -331,6 +366,7 @@ final class WorldModel {
         guard let task = a.task else { goRest(a); return }
         a.speed = 0
         a.yaw = lerpAngle(a.yaw, a.persona.station.workYaw, Float(dt) * 6)
+        if isLive { return } // progress and speech come from the real agent
         let before = a.progress
         a.progress = min(1, a.progress + dt / task.duration)
         a.tokens += Int(Double(task.tokens) * (a.progress - before))
@@ -360,7 +396,7 @@ final class WorldModel {
         if let t = a.task {
             a.tasksDone += 1
             a.progress = 1
-            log(a.id, "Quest clear: \(t.title)", .done)
+            log(a.id, "Quest clear: \(t.title)", .done, resultID: t.serverID)
             onEvent?(.questDone(a.id))
         }
         a.task = nil
@@ -488,13 +524,107 @@ final class WorldModel {
         onEvent?(.speak(a.id, style))
     }
 
-    private func log(_ id: String, _ text: String, _ kind: FeedEntry.Kind) {
+    private func log(_ id: String, _ text: String, _ kind: FeedEntry.Kind, resultID: String? = nil) {
         switch kind {
         case .done: pushToast(Toast(agentID: id, text: text, kind: .done, expires: clock + 4 * timeScale))
         case .approval: pushToast(Toast(agentID: id, text: text, kind: .approval, expires: clock + 5 * timeScale))
         default: break
         }
-        feed.insert(FeedEntry(time: clock, agentID: id, text: text, kind: kind), at: 0)
+        feed.insert(FeedEntry(time: clock, agentID: id, text: text, kind: kind, resultID: resultID), at: 0)
         if feed.count > 80 { feed.removeLast() }
+    }
+
+    // MARK: Live agents (events from the Mac server)
+
+    func setLive(_ on: Bool) {
+        guard on != isLive else { return }
+        isLive = on
+        for a in agents {
+            a.queue.removeAll()
+            if a.mode == .awaitingApproval || a.mode == .working || a.task != nil {
+                a.task = nil
+                a.progress = 0
+                goRest(a)
+            }
+        }
+        log("hana", on ? "Connected to your Mac. Real agents are on duty!" : "Disconnected from your Mac. Demo mode.", .info)
+    }
+
+    private func liveTask(_ title: String, _ serverID: String) -> AgentTask {
+        AgentTask(isCustom: true, title: title, lines: [], doneLine: "Quest complete!", duration: 60, tokens: 0,
+                  approvalPrompt: nil, serverID: serverID)
+    }
+
+    func liveQueued(_ agentID: String, serverID: String, title: String) {
+        guard let a = agent(agentID), a.task?.serverID != serverID,
+              !a.queue.contains(where: { $0.serverID == serverID }) else { return }
+        a.queue.append(liveTask(title, serverID))
+    }
+
+    func liveStarted(_ agentID: String, serverID: String, title: String) {
+        guard let a = agent(agentID) else { return }
+        a.queue.removeAll { $0.serverID == serverID }
+        if a.task?.serverID != serverID {
+            a.task = liveTask(title, serverID)
+            a.progress = 0.03
+            log(a.id, "Accepted quest: \(title)", .start)
+            onEvent?(.questStart(a.id))
+            say(a, ["On it!", "New quest!", "Leave it to me!"].randomElement()!, .speech, for: 2)
+        }
+        if a.mode != .working || a.arrival != .work { walk(a, to: a.persona.station, then: .work) }
+    }
+
+    func liveActivity(_ agentID: String, serverID: String, title: String, text: String, steps: Int) {
+        guard let a = agent(agentID) else { return }
+        if a.task?.serverID != serverID { liveStarted(agentID, serverID: serverID, title: title) }
+        say(a, text, .speech, for: 7)
+        a.progress = min(0.92, 1 - exp(-Double(steps + 1) / 7))
+    }
+
+    func liveApproval(_ agentID: String, serverID: String, title: String, proposal: String) {
+        guard let a = agent(agentID) else { return }
+        a.queue.removeAll { $0.serverID == serverID }
+        if a.task?.serverID != serverID { a.task = liveTask(title, serverID) }
+        a.task?.approvalPrompt = proposal
+        a.progress = max(a.progress, 0.8)
+        if a.mode != .awaitingApproval {
+            say(a, "I need your approval for this...", .thought, for: 2.5)
+            walk(a, to: .questBoard, then: .approval)
+        }
+    }
+
+    func liveDone(_ agentID: String, serverID: String, title: String, result: String, tokens: Int) {
+        guard let a = agent(agentID) else { return }
+        if !results.contains(where: { $0.id == serverID }) {
+            results.insert(LiveResult(id: serverID, agentID: agentID, title: title, text: result, date: Date()), at: 0)
+        }
+        a.tokens += tokens
+        a.queue.removeAll { $0.serverID == serverID }
+        if a.task?.serverID != serverID { a.task = liveTask(title, serverID) }
+        a.progress = 1
+        celebrate(a)
+    }
+
+    func liveFailed(_ agentID: String, serverID: String, text: String) {
+        guard let a = agent(agentID) else { return }
+        a.queue.removeAll { $0.serverID == serverID }
+        if a.task?.serverID == serverID || a.task == nil {
+            a.task = nil
+            a.progress = 0
+            a.expression = .sad
+            say(a, "Oops... that didn't work.", .speech, for: 4)
+            log(a.id, "Couldn't finish: \(text)", .info)
+            goRest(a)
+        }
+    }
+
+    func liveCancelled(_ agentID: String, serverID: String) {
+        guard let a = agent(agentID) else { return }
+        a.queue.removeAll { $0.serverID == serverID }
+        if a.task?.serverID == serverID {
+            a.task = nil
+            a.progress = 0
+            goRest(a)
+        }
     }
 }

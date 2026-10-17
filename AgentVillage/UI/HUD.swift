@@ -1,8 +1,9 @@
 import SwiftUI
 
-enum DashPanel: String, Identifiable {
+enum DashPanel: Hashable, Identifiable {
     case log, inbox, quest, stats, menu
-    var id: String { rawValue }
+    case report(String)
+    var id: String { "\(self)" }
 }
 
 /// Day + clock chip.
@@ -23,8 +24,9 @@ struct ClockChip: View {
                     PixelText(text: "DAY \(model.day)  \(model.clockString)", color: 0xC9D2FF, size: ps.small)
                 } else {
                     PixelText(text: model.clockString, color: 0xFFFFFF)
-                    PixelText(text: "DAY \(model.day)", color: 0x9AA3D6, shadow: nil, size: ps.small)
                 }
+                PixelText(text: model.isLive ? "LIVE ON MAC" : (showTitle ? "DEMO MODE" : "DAY \(model.day)"),
+                          color: model.isLive ? 0x7DFFA8 : 0x9AA3D6, shadow: nil, size: ps.small)
             }
         }
         .padding(.horizontal, 5 * ps.ui)
@@ -50,7 +52,9 @@ struct StatusStrip: View {
                 .onTapGesture(perform: onInbox)
             StatChip(icon: "check", value: "\(model.questsDone)", label: compact ? "" : "DONE", color: 0x9BFFC0)
                 .onTapGesture(perform: onStats)
-            StatChip(icon: "coin", value: String(format: "$%.2f", model.totalCost), label: compact ? "" : "SPENT", color: 0xFFE9A8)
+            StatChip(icon: model.isLive ? "mana" : "coin",
+                     value: model.isLive ? tokenString(model.totalTokens) : String(format: "$%.2f", model.totalCost),
+                     label: compact ? "" : (model.isLive ? "TOKENS" : "SPENT"), color: 0xFFE9A8)
                 .onTapGesture(perform: onStats)
         }
     }
@@ -244,4 +248,8 @@ struct ZoomCluster: View {
             PixelButton(icon: "home", action: onHome)
         }
     }
+}
+
+func tokenString(_ n: Int) -> String {
+    n >= 1_000_000 ? String(format: "%.1fM", Double(n) / 1_000_000) : (n >= 1000 ? String(format: "%.1fK", Double(n) / 1000) : "\(n)")
 }

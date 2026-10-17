@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 // MARK: Inbox — every approval in one place
 
@@ -31,7 +36,7 @@ struct InboxPanel: View {
                                     PixelText(text: a.persona.name.uppercased(), color: a.persona.aura)
                                     PixelText(text: (a.task?.title ?? "").uppercased(), color: 0xFFD23F, shadow: nil, size: ps.small)
                                 }
-                                PixelParagraph(text: a.task?.approvalPrompt ?? "Needs your approval.", maxWidth: 250, color: 0xE6ECFF)
+                                ProposalText(text: a.task?.approvalPrompt ?? "Needs your approval.")
                             }
                         }
                         HStack(spacing: 3 * ps.ui) {
@@ -102,8 +107,27 @@ struct NewQuestPanel: View {
                 PixelActionButton(title: "ADD TO \(agent.persona.name.uppercased())'S QUEUE", icon: "plus", style: .accent,
                                   disabled: title.trimmingCharacters(in: .whitespaces).isEmpty, action: add)
 
-                PixelText(text: "OR PICK A COMMON QUEST", color: 0x9AA3D6, shadow: nil, size: ps.small)
+                PixelText(text: model.isLive ? "OR PICK A REAL TASK (RUNS ON YOUR MAC)" : "OR PICK A COMMON QUEST", color: model.isLive ? 0x7DFFA8 : 0x9AA3D6, shadow: nil, size: ps.small)
                     .padding(.top, 2 * ps.ui)
+                if model.isLive {
+                    VStack(alignment: .leading, spacing: 3 * ps.ui) {
+                        ForEach(Array(agent.persona.liveIdeas.enumerated()), id: \.offset) { _, idea in
+                            Button {
+                                Chiptune.shared.play(.select)
+                                model.enqueue(model.customTask(for: agent.persona, title: idea.0, needsApproval: idea.1), for: agent)
+                            } label: {
+                                HStack(alignment: .top, spacing: 3 * ps.ui) {
+                                    PixelIcon(name: "plus", scale: ps.small)
+                                    PixelParagraph(text: idea.0, maxWidth: 270, color: 0xE6ECFF, size: ps.small)
+                                    if idea.1 { PixelIcon(name: "ask", scale: ps.small) }
+                                }
+                                .padding(.vertical, 2 * ps.ui)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } else {
                 VStack(alignment: .leading, spacing: 2 * ps.ui) {
                     ForEach(agent.persona.tasks) { t in
                         Button {
@@ -122,6 +146,7 @@ struct NewQuestPanel: View {
                         }
                         .buttonStyle(.plain)
                     }
+                }
                 }
 
                 QueueList(model: model, agent: agent)
@@ -223,6 +248,7 @@ struct StatsPanel: View {
 
 struct LogPanel: View {
     let model: WorldModel
+    var onRead: (String) -> Void = { _ in }
     var onClose: () -> Void
     @Environment(\.pixelScale) private var ps
     @State private var kind: String = "ALL"
@@ -232,7 +258,7 @@ struct LogPanel: View {
         PixelPanel(title: "QUEST LOG", icon: "list", onClose: onClose) {
             VStack(alignment: .leading, spacing: 5 * ps.ui) {
                 HStack(spacing: 2 * ps.ui) {
-                    ForEach(["ALL", "DONE", "ASKS", "CHATS"], id: \.self) { k in
+                    ForEach(["ALL", "RESULTS", "DONE", "ASKS", "CHATS"], id: \.self) { k in
                         Button { Chiptune.shared.play(.select); kind = k } label: {
                             PixelText(text: k, color: kind == k ? 0xFFD23F : 0xC9D2FF, shadow: nil)
                                 .padding(.horizontal, 4 * ps.ui).padding(.vertical, 2 * ps.ui)
@@ -251,8 +277,30 @@ struct LogPanel: View {
                         .buttonStyle(.plain)
                     }
                 }
-                let entries = filtered
-                if entries.isEmpty {
+                if kind == "RESULTS" {
+                    if model.results.isEmpty {
+                        PixelText(text: "No results yet. Finished real tasks appear here.", color: 0x6A6F96, shadow: nil, size: ps.small)
+                    }
+                    ForEach(model.results.filter { agentFilter == nil || $0.agentID == agentFilter }) { r in
+                        Button { Chiptune.shared.play(.select); onRead(r.id) } label: {
+                            HStack(spacing: 4 * ps.ui) {
+                                if let a = model.agent(r.agentID) {
+                                    PixelUI.portraitImage(a.persona, .happy).resizable().interpolation(.none)
+                                        .frame(width: 22 * ps.small, height: 22 * ps.small)
+                                }
+                                PixelParagraph(text: r.title, maxWidth: 220, color: 0xFFFFFF, size: ps.small)
+                                Spacer(minLength: 2)
+                                PixelText(text: "READ", color: 0xFFD23F)
+                            }
+                            .padding(3 * ps.ui)
+                            .background(Color(hex: 0x0C0818, opacity: 0.35))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                let entries = kind == "RESULTS" ? [] : filtered
+                if entries.isEmpty && kind != "RESULTS" {
                     PixelText(text: "Nothing here yet.", color: 0x6A6F96, shadow: nil, size: ps.small)
                 }
                 ForEach(entries) { e in
@@ -313,6 +361,7 @@ struct FeedLine: View {
 
 struct MenuPanel: View {
     let model: WorldModel
+    let link: LiveLink
     var onRecenter: () -> Void
     var onClose: () -> Void
     @Environment(\.pixelScale) private var ps
@@ -322,6 +371,7 @@ struct MenuPanel: View {
     var body: some View {
         PixelPanel(title: "MENU", icon: "gear", onClose: onClose) {
             VStack(alignment: .leading, spacing: 5 * ps.ui) {
+                MacConnectSection(link: link)
                 row("music", "MUSIC", music ? "ON" : "OFF") {
                     music.toggle(); Chiptune.shared.setMusic(music)
                 }
@@ -354,5 +404,169 @@ struct MenuPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: Mac connection
+
+struct MacConnectSection: View {
+    let link: LiveLink
+    @Environment(\.pixelScale) private var ps
+    @State private var address = ""
+    @State private var code = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4 * ps.ui) {
+            HStack(spacing: 3 * ps.ui) {
+                PixelIcon(name: "work")
+                PixelText(text: "YOUR MAC", color: 0xFFD23F)
+                Spacer()
+                PixelText(text: link.isConnected ? "LIVE" : "DEMO", color: link.isConnected ? 0x7DFFA8 : 0x9AA3D6)
+            }
+            PixelParagraph(text: link.status.label, maxWidth: 300, color: statusColor, size: ps.small)
+            if !link.isConnected {
+                if !link.found.isEmpty {
+                    PixelText(text: "FOUND ON YOUR WI-FI", color: 0x9AA3D6, shadow: nil, size: ps.small)
+                    ForEach(link.found) { f in
+                        Button { Chiptune.shared.play(.select); address = f.address } label: {
+                            HStack(spacing: 3 * ps.ui) {
+                                PixelText(text: address == f.address ? "▶" : " ", color: 0xFFD23F)
+                                PixelText(text: f.name, color: 0xFFFFFF, size: ps.small)
+                                PixelText(text: f.address, color: 0x9AA3D6, shadow: nil, size: ps.small)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                field("Mac address (e.g. 10.0.0.236)", text: $address)
+                field("Pairing code from your Mac", text: $code)
+                PixelActionButton(title: "CONNECT", icon: "check", style: .good,
+                                  disabled: address.isEmpty || code.isEmpty) {
+                    link.address = address
+                    link.code = code
+                    link.connect()
+                }
+                PixelText(text: "On your Mac run: python3 server/village_server.py", color: 0x6A6F96, shadow: nil, size: ps.small)
+            } else {
+                PixelActionButton(title: "DISCONNECT", icon: "cross", style: .bad) { link.disconnect() }
+            }
+        }
+        .padding(5 * ps.ui)
+        .background(Color(hex: 0x0C0818, opacity: 0.35))
+        .onAppear {
+            address = link.address
+            code = link.code
+            link.startBrowsing()
+        }
+        .onChange(of: link.address) { _, a in if address.isEmpty { address = a } }
+    }
+
+    private var statusColor: UInt32 {
+        switch link.status {
+        case .connected: 0x7DFFA8
+        case .failed: 0xFF9EB0
+        default: 0xC9D2FF
+        }
+    }
+
+    private func field(_ prompt: String, text: Binding<String>) -> some View {
+        TextField("", text: text, prompt: Text(prompt).foregroundStyle(Color(hex: 0x6A6F96)))
+            .textFieldStyle(.plain)
+            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.white)
+            .autocorrectionDisabled()
+            #if os(iOS)
+            .textInputAutocapitalization(.never)
+            #endif
+            .padding(.horizontal, 6 * ps.ui)
+            .padding(.vertical, 4 * ps.ui)
+            .pixelWindow(top: 0x0F1030, bottom: 0x0F1030)
+    }
+}
+
+// MARK: Reading results
+
+/// Readable (non-pixel) rendering of an agent's Markdown answer.
+struct ReadableMarkdown: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, raw in
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                if line.isEmpty {
+                    Color.clear.frame(height: 2)
+                } else if line.hasPrefix("#") {
+                    Text(line.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(hex: 0xFFD23F))
+                        .padding(.top, 4)
+                } else if line.hasPrefix("- ") || line.hasPrefix("* ") || line.first?.isNumber == true && line.contains(". ") {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(line.hasPrefix("- ") || line.hasPrefix("* ") ? "•" : "")
+                            .foregroundStyle(Color(hex: 0xFF8FB8))
+                        Text(inline(line.hasPrefix("- ") || line.hasPrefix("* ") ? String(line.dropFirst(2)) : line))
+                    }
+                } else {
+                    Text(inline(line))
+                }
+            }
+        }
+        .font(.system(size: 14, weight: .regular, design: .rounded))
+        .foregroundStyle(Color(hex: 0xE6ECFF))
+        .textSelection(.enabled)
+    }
+
+    private func inline(_ s: String) -> AttributedString {
+        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+    }
+}
+
+struct ProposalText: View {
+    let text: String
+    var body: some View {
+        ScrollView {
+            ReadableMarkdown(text: text).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 180)
+        .padding(8)
+        .background(Color(hex: 0x0C0818, opacity: 0.55))
+    }
+}
+
+struct ReportPanel: View {
+    let model: WorldModel
+    let resultID: String
+    var onClose: () -> Void
+    @Environment(\.pixelScale) private var ps
+
+    var body: some View {
+        let r = model.results.first { $0.id == resultID }
+        PixelPanel(title: "REPORT", icon: "scroll", onClose: onClose) {
+            VStack(alignment: .leading, spacing: 6 * ps.ui) {
+                if let r, let a = model.agent(r.agentID) {
+                    HStack(spacing: 4 * ps.ui) {
+                        PixelUI.portraitImage(a.persona, .happy).resizable().interpolation(.none)
+                            .frame(width: 30 * ps.small, height: 30 * ps.small)
+                        VStack(alignment: .leading, spacing: 2 * ps.ui) {
+                            PixelText(text: a.persona.name.uppercased(), color: a.persona.aura)
+                            PixelParagraph(text: r.title, maxWidth: 260, color: 0xFFFFFF, size: ps.small)
+                        }
+                    }
+                    ReadableMarkdown(text: r.text)
+                    PixelActionButton(title: "COPY", icon: "scroll") {
+                        #if os(iOS)
+                        UIPasteboard.general.string = r.text
+                        #else
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(r.text, forType: .string)
+                        #endif
+                    }
+                } else {
+                    PixelText(text: "This report isn't available.", color: 0x9AA3D6)
+                }
+            }
+        }
     }
 }

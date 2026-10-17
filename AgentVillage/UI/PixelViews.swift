@@ -84,7 +84,7 @@ struct PixelWindow: ViewModifier {
         let inset = 4 * ps.ui
         content
             .background {
-                LinearGradient(colors: [Color(hex: top, opacity: 0.94), Color(hex: bottom, opacity: 0.94)], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Color(hex: top), Color(hex: bottom)], startPoint: .top, endPoint: .bottom)
                     .padding(ps.ui)
             }
             .overlay {

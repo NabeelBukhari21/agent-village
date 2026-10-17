@@ -6,6 +6,7 @@ struct DialogueWindow: View {
     let model: WorldModel
     var width: CGFloat
     var onNewQuest: (String) -> Void
+    var onRead: (String) -> Void = { _ in }
     var onClose: () -> Void
     @Environment(\.pixelScale) private var ps
     @State private var line = ""
@@ -195,6 +196,18 @@ struct DialogueWindow: View {
                 }
             }
             QueueList(model: model, agent: agent)
+            if let r = model.results.first(where: { $0.agentID == agent.id }) {
+                Button { Chiptune.shared.play(.select); onRead(r.id) } label: {
+                    HStack(spacing: 3 * ps.ui) {
+                        PixelIcon(name: "scroll", scale: ps.small)
+                        PixelText(text: "LAST RESULT:", color: 0x9AA3D6, shadow: nil, size: ps.small)
+                        PixelText(text: String(r.title.prefix(24)), color: 0xFFFFFF, size: ps.small)
+                        PixelText(text: "READ ▶", color: 0xFFD23F)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
             VStack(alignment: .leading, spacing: 2 * ps.ui) {
                 PixelText(text: "RECENTLY", color: 0x9AA3D6, shadow: nil, size: ps.small)
                 ForEach(Array(recent)) { e in FeedLine(entry: e, model: model) }

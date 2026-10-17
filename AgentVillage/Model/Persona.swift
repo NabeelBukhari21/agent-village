@@ -67,7 +67,9 @@ struct AgentTask: Identifiable {
     let duration: Double
     let tokens: Int
     /// When set, the agent stops partway and asks the player for approval.
-    let approvalPrompt: String?
+    var approvalPrompt: String?
+    /// Task id on the Mac server when this is a real (live) task.
+    var serverID: String? = nil
 }
 
 struct Persona: Identifiable {
@@ -122,7 +124,7 @@ extension Persona {
     )
 
     static let ren = Persona(
-        id: "ren", name: "Ren", title: "Code Smith", role: "Coding agent",
+        id: "ren", name: "Ren", title: "Mac Smith", role: "Mac operator & coder",
         station: .forge, hairStyle: .spiky, accessory: .headband, prop: .hammer, motion: .hammer,
         hair: 0xE8EEF7, hairShade: 0x9FB2CC, eye: 0x27C2E8, outfit: 0x232A3D, outfitAccent: 0x27C2E8,
         skin: 0xFFDCC6, aura: 0x3BD4FF,
@@ -164,7 +166,7 @@ extension Persona {
     )
 
     static let kaito = Persona(
-        id: "kaito", name: "Kaito", title: "Star Analyst", role: "Data agent",
+        id: "kaito", name: "Kaito", title: "Star Analyst", role: "Files & data analyst",
         station: .observatory, hairStyle: .messy, accessory: .goggles, prop: .tablet, motion: .observe,
         hair: 0x5FD39A, hairShade: 0x2E9E6B, eye: 0xF2A93B, outfit: 0xF4F6FA, outfitAccent: 0x2E9E6B,
         skin: 0xF7D2B8, aura: 0x4ADE80,
@@ -197,4 +199,34 @@ enum Banter {
         ("Ganbatte!","You too! !"),
         ("The sakura are blooming~","So pretty…"),
     ]
+}
+
+extension Persona {
+    /// Real tasks the agent can do on your Mac (prompt, ask before finishing).
+    var liveIdeas: [(String, Bool)] {
+        switch id {
+        case "hana": [
+            ("Summarize my emails from the last 24 hours and tell me what needs attention", false),
+            ("Find emails that need a reply and write draft replies for me", false),
+            ("Which newsletters or promos email me the most? Suggest what to unsubscribe from", false),
+        ]
+        case "ren": [
+            ("Check my Mac's free disk space and battery health", false),
+            ("Find the 20 biggest files and folders using up my disk space", false),
+            ("Tidy my Desktop: sort its files into folders by type", true),
+            ("Which apps are using the most memory right now?", false),
+        ]
+        case "yuki": [
+            ("Summarize today's most important AI news with sources", false),
+            ("Research the best budget laptops for students right now", false),
+            ("Compare the top 3 note-taking apps: features, price, pros and cons", false),
+        ]
+        case "kaito": [
+            ("What's taking up space in my Downloads folder? Group it by type and age", false),
+            ("Count the files in my Documents folder by type and size", false),
+            ("Find duplicate files in my Downloads folder", false),
+        ]
+        default: []
+        }
+    }
 }
