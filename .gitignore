@@ -1,0 +1,14 @@
+# Xcode / build output
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# macOS
+.DS_Store
+
+# Local agent server data (never commit secrets or personal results)
+server/data/
+*.token
