@@ -485,6 +485,16 @@ def lan_ip() -> str:
         return "127.0.0.1"
 
 
+def tailscale_ips() -> list[str]:
+    """Addresses in Tailscale's 100.64.0.0/10 range, if Tailscale is running."""
+    try:
+        out = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return []
+    ips = re.findall(r"inet (100\.(\d+)\.\d+\.\d+)", out)
+    return [ip for ip, second in ips if 64 <= int(second) <= 127]
+
+
 def main() -> None:
     global TOKEN
     for d in (DATA, WORKSPACE, REPORTS):
@@ -517,6 +527,8 @@ def main() -> None:
 
     print("\n  🏯  Agent Village server is running")
     print(f"      Address:      {lan_ip()}:{PORT}   (also found automatically on your Wi-Fi)")
+    for ip in tailscale_ips():
+        print(f"      Away address: {ip}:{PORT}   (Tailscale — works from anywhere)")
     print(f"      Pairing code: {TOKEN}")
     print(f"      Data folder:  {DATA}")
     print(f"      Claude Code:  {CLAUDE}\n")

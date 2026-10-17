@@ -29,7 +29,11 @@ final class LiveLink {
     var status: Status = .off
     var found: [Found] = []
     var address: String
+    /// Optional second address used when away from home (e.g. the Mac's Tailscale IP).
+    var awayAddress: String
     var code: String
+    /// Which address is in use right now.
+    var via: String = ""
 
     @ObservationIgnored private let model: WorldModel
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -49,6 +53,7 @@ final class LiveLink {
         self.model = model
         let d = UserDefaults.standard
         address = d.string(forKey: "macAddress") ?? ""
+        awayAddress = d.string(forKey: "macAwayAddress") ?? ""
         code = d.string(forKey: "macCode") ?? ""
         model.onLiveCreate = { [weak self] agent, prompt, ask in self?.create(agent: agent.id, prompt: prompt, needsApproval: ask) }
         model.onLiveDecision = { [weak self] id, ok in self?.decide(id, ok) }
@@ -95,11 +100,14 @@ final class LiveLink {
 
     func connect() {
         let addr = address.trimmingCharacters(in: .whitespaces)
+        let away = awayAddress.trimmingCharacters(in: .whitespaces)
         let c = code.trimmingCharacters(in: .whitespaces).uppercased()
-        guard !addr.isEmpty, !c.isEmpty else { status = .failed("Enter your Mac's address and pairing code."); return }
+        guard !addr.isEmpty || !away.isEmpty, !c.isEmpty else { status = .failed("Enter your Mac's address and pairing code."); return }
         address = addr
+        awayAddress = away
         code = c
         UserDefaults.standard.set(addr, forKey: "macAddress")
+        UserDefaults.standard.set(away, forKey: "macAwayAddress")
         UserDefaults.standard.set(c, forKey: "macCode")
         pollTask?.cancel()
         status = .connecting
@@ -116,13 +124,18 @@ final class LiveLink {
     /// Reconnects automatically at launch if we've paired before.
     func autoConnect() {
         startBrowsing()
-        if !address.isEmpty, !code.isEmpty, !isConnected { connect() }
+        if !(address.isEmpty && awayAddress.isEmpty), !code.isEmpty, !isConnected { connect() }
     }
 
     private func run() async {
         var failures = 0
         while !Task.isCancelled {
             do {
+                // Prefer the home Wi-Fi address; fall back to the away (Tailscale) address.
+                guard let picked = await reachable() else {
+                    throw LinkError.server(failures > 1 ? "Can't reach your Mac at home or away. Is it on and awake?" : "Looking for your Mac...")
+                }
+                via = picked
                 let state: StateResponse = try await get("/api/state")
                 seq = state.seq
                 status = .connected(state.machine.replacingOccurrences(of: ".local", with: ""))
@@ -201,8 +214,22 @@ final class LiveLink {
         }
     }
 
-    private func url(_ path: String) -> URL? {
-        let base = address.hasPrefix("http") ? address : "http://\(address)"
+    /// Returns the first configured address that answers a quick ping.
+    private func reachable() async -> String? {
+        for candidate in [address, awayAddress] where !candidate.isEmpty {
+            guard let u = url("/api/ping", base: candidate) else { continue }
+            var req = URLRequest(url: u)
+            req.timeoutInterval = 4
+            if let (_, resp) = try? await session.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private func url(_ path: String, base candidate: String? = nil) -> URL? {
+        let addr = candidate ?? (via.isEmpty ? address : via)
+        let base = addr.hasPrefix("http") ? addr : "http://\(addr)"
         let withPort = base.split(separator: ":").count > 2 ? base : base + ":8787"
         return URL(string: withPort + path)
     }

@@ -413,6 +413,7 @@ struct MacConnectSection: View {
     let link: LiveLink
     @Environment(\.pixelScale) private var ps
     @State private var address = ""
+    @State private var away = ""
     @State private var code = ""
 
     var body: some View {
@@ -423,7 +424,8 @@ struct MacConnectSection: View {
                 Spacer()
                 PixelText(text: link.isConnected ? "LIVE" : "DEMO", color: link.isConnected ? 0x7DFFA8 : 0x9AA3D6)
             }
-            PixelParagraph(text: link.status.label, maxWidth: 300, color: statusColor, size: ps.small)
+            PixelParagraph(text: link.status.label + (link.isConnected ? (link.via == link.awayAddress && !link.awayAddress.isEmpty ? " (away, via Tailscale)" : " (home Wi-Fi)") : ""),
+                           maxWidth: 300, color: statusColor, size: ps.small)
             if !link.isConnected {
                 if !link.found.isEmpty {
                     PixelText(text: "FOUND ON YOUR WI-FI", color: 0x9AA3D6, shadow: nil, size: ps.small)
@@ -440,10 +442,12 @@ struct MacConnectSection: View {
                     }
                 }
                 field("Mac address (e.g. 10.0.0.236)", text: $address)
+                field("Away address - Tailscale (optional)", text: $away)
                 field("Pairing code from your Mac", text: $code)
                 PixelActionButton(title: "CONNECT", icon: "check", style: .good,
-                                  disabled: address.isEmpty || code.isEmpty) {
+                                  disabled: (address.isEmpty && away.isEmpty) || code.isEmpty) {
                     link.address = address
+                    link.awayAddress = away
                     link.code = code
                     link.connect()
                 }
@@ -456,6 +460,7 @@ struct MacConnectSection: View {
         .background(Color(hex: 0x0C0818, opacity: 0.35))
         .onAppear {
             address = link.address
+            away = link.awayAddress
             code = link.code
             link.startBrowsing()
         }
