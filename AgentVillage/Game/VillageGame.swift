@@ -63,13 +63,13 @@ final class VillageGame: SKScene {
 
     private func build() {
         // Ground + animated water
-        let ground = SKSpriteNode(texture: MapArt.ground().texture())
+        let ground = SKSpriteNode(texture: (ArtCache.ground ?? MapArt.ground()).texture())
         ground.anchorPoint = CGPoint(x: 0, y: 1)
         ground.position = Self.mapPoint(0, 0)
         ground.zPosition = 0
         world.addChild(ground)
 
-        let waterTex = MapArt.waterFrames().map { $0.texture() }
+        let waterTex = (ArtCache.water ?? MapArt.waterFrames()).map { $0.texture() }
         let water = SKSpriteNode(texture: waterTex[0])
         water.anchorPoint = CGPoint(x: 0, y: 1)
         water.position = ground.position

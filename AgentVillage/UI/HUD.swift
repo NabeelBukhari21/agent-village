@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum DashPanel: Hashable, Identifiable {
-    case log, inbox, quest, stats, menu
+    case log, inbox, quest, stats, menu, alerts
     case report(String)
     var id: String { "\(self)" }
 }
@@ -151,42 +151,6 @@ private struct PartyMember: View {
         }
         return agent.mode.label.uppercased()
     }
-}
-
-/// Pop-up alerts for finished quests and approval requests.
-struct ToastStack: View {
-    let model: WorldModel
-    var onTap: (Toast) -> Void
-    @Environment(\.pixelScale) private var ps
-
-    var body: some View {
-        VStack(spacing: 3 * ps.ui) {
-            ForEach(model.toasts) { t in
-                if let a = model.agent(t.agentID) {
-                    Button { onTap(t) } label: {
-                        HStack(spacing: 4 * ps.ui) {
-                            PixelUI.portraitImage(a.persona, t.kind == .done ? .happy : .surprised)
-                                .resizable().interpolation(.none)
-                                .frame(width: 26 * ps.small, height: 26 * ps.small)
-                            VStack(alignment: .leading, spacing: 1 * ps.ui) {
-                                PixelText(text: t.kind == .done ? "QUEST COMPLETE" : "\(a.persona.name.uppercased()) NEEDS YOU",
-                                          color: t.kind == .done ? 0x9BFFC0 : 0xFFD23F)
-                                PixelText(text: shorten(a.task?.title ?? t.text.replacingOccurrences(of: "Quest clear: ", with: "")), color: 0xE6ECFF, shadow: nil, size: ps.small)
-                            }
-                        }
-                        .padding(.horizontal, 6 * ps.ui)
-                        .padding(.vertical, 3 * ps.ui)
-                        .pixelWindow(top: t.kind == .done ? 0x1F5A3C : 0x6A2038, bottom: t.kind == .done ? 0x0F3020 : 0x3A0E20)
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: model.toasts)
-    }
-
-    private func shorten(_ s: String) -> String { s.count > 34 ? String(s.prefix(33)) + "." : s }
 }
 
 /// Bottom navigation for the dashboard panels.

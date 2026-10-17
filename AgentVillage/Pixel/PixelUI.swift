@@ -149,6 +149,7 @@ enum PixelUI {
         case "pausei": rows = ["pp..pp..", "pp..pp..", "pp..pp..", "pp..pp..", "pp..pp..", "pp..pp..", "pp..pp..", "........"]
         case "clock": rows = ["..wwww..", ".w..k.w.", "w...k..w", "w...kk.w", "w......w", ".w....w.", "..wwww..", "........"]
         case "work": rows = ["..cc....", ".c..c...", ".c..c...", "..cccc..", "....ccc.", ".....ccc", "......cc", "........"]
+        case "bell": rows = ["...yy...", "..yYyy..", ".yYyyyy.", ".yYyyyy.", ".yyyyyyo", "yyyyyyyy", "...oo...", "........"]
         case "heart": rows = [".rr.rr..", "rRrrrrr.", "rRrrrrr.", "rrrrrrr.", ".rrrrr..", "..rrr...", "...r....", "........"]
         default: rows = ["wwwwwwww"]
         }

@@ -28,13 +28,20 @@ struct Bubble: Equatable {
     var id = UUID()
 }
 
-struct Toast: Identifiable, Equatable {
-    enum Kind { case done, approval, info }
+/// A notification: shown as a banner, kept in the notification center.
+struct AppNotice: Identifiable, Equatable {
+    enum Kind { case approval, done, failed, started, live, info }
     let id = UUID()
-    let agentID: String
-    let text: String
     let kind: Kind
-    let expires: Double
+    let agentID: String?
+    let title: String
+    let body: String
+    var serverID: String? = nil
+    var resultID: String? = nil
+    let date = Date()
+    var read = false
+    /// When the banner leaves the screen; nil = stays until handled.
+    var expires: Date?
 }
 
 struct FeedEntry: Identifiable {
@@ -132,7 +139,12 @@ enum GameEvent {
 final class WorldModel {
     let agents: [AgentState]
     var feed: [FeedEntry] = []
-    var toasts: [Toast] = []
+    /// Notification history (newest first) and the banners currently on screen.
+    var notices: [AppNotice] = []
+    var banners: [AppNotice] = []
+    var unreadCount: Int { notices.filter { !$0.read }.count }
+    /// Called for every new notice (system notifications, haptics).
+    @ObservationIgnored var onNotice: ((AppNotice) -> Void)?
     var approvalsGranted = 0
     var approvalsDenied = 0
     var selectedID: String?
@@ -280,7 +292,16 @@ final class WorldModel {
     func tick(_ realDT: Double) {
         let dt = min(realDT, 0.1) * timeScale
         clock += dt
-        if toasts.contains(where: { $0.expires < clock }) { toasts.removeAll { $0.expires < clock } }
+        let now = Date()
+        if banners.contains(where: { ($0.expires ?? .distantFuture) < now }) {
+            banners.removeAll { ($0.expires ?? .distantFuture) < now }
+        }
+        // Approval banners disappear once the agent is no longer waiting.
+        if banners.contains(where: { $0.kind == .approval }) {
+            banners.removeAll { b in
+                b.kind == .approval && agent(b.agentID ?? "")?.mode != .awaitingApproval
+            }
+        }
         for a in agents { step(a, dt: dt) }
         checkEncounters(dt)
     }
@@ -514,9 +535,49 @@ final class WorldModel {
 
     // MARK: Helpers
 
-    private func pushToast(_ t: Toast) {
-        toasts.append(t)
-        if toasts.count > 2 { toasts.removeFirst() }
+    // MARK: Notifications
+
+    func notify(_ kind: AppNotice.Kind, agentID: String?, title: String, body: String,
+                serverID: String? = nil, resultID: String? = nil) {
+        let life: Double? = switch kind {
+        case .approval: nil
+        case .done: 6
+        case .failed: 8
+        case .started: 2.5
+        case .live, .info: 3.5
+        }
+        let n = AppNotice(kind: kind, agentID: agentID, title: title, body: body, serverID: serverID, resultID: resultID,
+                          read: kind == .started, expires: life.map { Date().addingTimeInterval($0) })
+        notices.insert(n, at: 0)
+        if notices.count > 100 { notices.removeLast() }
+        banners.removeAll { $0.kind == .started }
+        banners.append(n)
+        if banners.count > 3 { banners.removeFirst() }
+        onNotice?(n)
+    }
+
+    func dismissBanner(_ id: UUID) {
+        banners.removeAll { $0.id == id }
+        markRead(id)
+    }
+
+    func markRead(_ id: UUID) {
+        if let i = notices.firstIndex(where: { $0.id == id }) { notices[i].read = true }
+    }
+
+    func markAllRead() {
+        for i in notices.indices { notices[i].read = true }
+    }
+
+    func clearNotices() {
+        notices.removeAll()
+    }
+
+    /// Agent that's waiting on a given notice's approval, if still waiting.
+    func waitingAgent(for n: AppNotice) -> AgentState? {
+        guard let a = agent(n.agentID ?? ""), a.mode == .awaitingApproval else { return nil }
+        if let sid = n.serverID, a.task?.serverID != sid { return nil }
+        return a
     }
 
     func say(_ a: AgentState, _ text: String, _ style: Bubble.Style, for seconds: Double) {
@@ -525,9 +586,15 @@ final class WorldModel {
     }
 
     private func log(_ id: String, _ text: String, _ kind: FeedEntry.Kind, resultID: String? = nil) {
+        let name = agent(id)?.persona.name.uppercased() ?? ""
+        let detail = text.split(separator: ":", maxSplits: 1).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? text
         switch kind {
-        case .done: pushToast(Toast(agentID: id, text: text, kind: .done, expires: clock + 4 * timeScale))
-        case .approval: pushToast(Toast(agentID: id, text: text, kind: .approval, expires: clock + 5 * timeScale))
+        case .done:
+            notify(.done, agentID: id, title: "QUEST COMPLETE", body: "\(name): \(detail)", resultID: resultID)
+        case .approval:
+            notify(.approval, agentID: id, title: "\(name) NEEDS YOU", body: detail, serverID: agent(id)?.task?.serverID)
+        case .start where isLive:
+            notify(.started, agentID: id, title: "QUEST STARTED", body: "\(name): \(detail)")
         default: break
         }
         feed.insert(FeedEntry(time: clock, agentID: id, text: text, kind: kind, resultID: resultID), at: 0)
@@ -548,6 +615,8 @@ final class WorldModel {
             }
         }
         log("hana", on ? "Connected to your Mac. Real agents are on duty!" : "Disconnected from your Mac. Demo mode.", .info)
+        notify(on ? .live : .info, agentID: nil, title: on ? "LIVE ON YOUR MAC" : "DISCONNECTED",
+               body: on ? "Real agents are on duty." : "Back to demo mode.")
     }
 
     private func liveTask(_ title: String, _ serverID: String) -> AgentTask {
@@ -613,6 +682,7 @@ final class WorldModel {
             a.progress = 0
             a.expression = .sad
             say(a, "Oops... that didn't work.", .speech, for: 4)
+            notify(.failed, agentID: a.id, title: "QUEST FAILED", body: "\(a.persona.name.uppercased()): \(text)", serverID: serverID)
             log(a.id, "Couldn't finish: \(text)", .info)
             goRest(a)
         }

@@ -14,6 +14,7 @@ struct GameView: View {
     @State private var dragBlocked = false
     @State private var insets = EdgeInsets()
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let model = WorldModel()
@@ -56,10 +57,13 @@ struct GameView: View {
                 game.size = geo.size
                 game.setDefaultZoom(viewSize: geo.size)
                 Chiptune.shared.start()
+                SystemNotifier.shared.attach(model)
                 link.autoConnect()
             }
         }
         .background(Color(hex: 0x24452C))
+        .onChange(of: scenePhase) { _, phase in SystemNotifier.shared.appActive = phase == .active }
+        .onChange(of: model.isLive) { _, live in if live { SystemNotifier.shared.requestPermissionIfNeeded() } }
     }
 
     // MARK: Layouts
@@ -72,9 +76,12 @@ struct GameView: View {
             HStack(alignment: .top, spacing: 4) {
                 PartyBar(model: model, vertical: false) { select($0) }.hudRegion()
                 Spacer(minLength: 0)
-                ClockChip(model: model, showTitle: false).hudRegion()
+                VStack(alignment: .trailing, spacing: 4) {
+                    ClockChip(model: model, showTitle: false).hudRegion()
+                    BellButton(model: model) { toggle(.alerts) }.hudRegion()
+                }
             }
-            ToastStack(model: model, onTap: toastTapped).hudRegion()
+            BannerStack(model: model, onOpen: openNotice, onRead: { panel = .report($0) }).hudRegion()
             Spacer(minLength: 0)
             VStack(spacing: 4) { bottom(size: size) }.hudRegion()
         }
@@ -89,6 +96,7 @@ struct GameView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 ClockChip(model: model, showTitle: true).hudRegion()
+                BellButton(model: model) { toggle(.alerts) }.hudRegion()
                 Spacer()
                 statusStrip.hudRegion()
             }
@@ -96,7 +104,8 @@ struct GameView: View {
                 PartyBar(model: model, vertical: true) { select($0) }.hudRegion()
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 8) {
-                    ToastStack(model: model, onTap: toastTapped).hudRegion()
+                    BannerStack(model: model, onOpen: openNotice, onRead: { panel = .report($0) }).hudRegion()
+                        .frame(width: 420)
                     if let panel {
                         panelView(panel)
                             .hudRegion()
@@ -165,6 +174,7 @@ struct GameView: View {
         case .inbox: InboxPanel(model: model, onGoTo: { id in panel = nil; select(id) }) { panel = nil }
         case .quest: NewQuestPanel(model: model, agentID: $questAgentID) { panel = nil }
         case .stats: StatsPanel(model: model) { panel = nil }
+        case .alerts: NoticeCenterPanel(model: model, onOpen: openNotice) { panel = nil }
         case .menu: MenuPanel(model: model, link: link, onRecenter: { panel = nil; select(nil); game.recenter() }) { panel = nil }
         }
     }
@@ -182,9 +192,26 @@ struct GameView: View {
         panel = .quest
     }
 
-    private func toastTapped(_ t: Toast) {
-        panel = nil
-        select(t.agentID)
+    /// Where tapping a notification takes you.
+    private func openNotice(_ n: AppNotice) {
+        switch n.kind {
+        case .approval where model.waitingAgent(for: n) != nil:
+            panel = nil
+            select(n.agentID)
+        case .done:
+            if let rid = n.resultID, model.results.contains(where: { $0.id == rid }) {
+                model.selectedID = nil
+                panel = .report(rid)
+            } else {
+                panel = nil
+                select(n.agentID)
+            }
+        case .live, .info:
+            model.selectedID = nil
+            panel = .menu
+        default:
+            if let id = n.agentID { panel = nil; select(id) }
+        }
     }
 
     private func select(_ id: String?) {

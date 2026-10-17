@@ -11,6 +11,12 @@ Instead of a flat list of jobs and logs, your AI agents live in a little anime v
 </p>
 
 <p align="center">
+  <img src="docs/screenshots/loading-screen.png" width="260" alt="Animated loading screen">
+  <img src="docs/screenshots/approval-banner.png" width="260" alt="Approval notification with Approve / Deny">
+  <img src="docs/screenshots/alerts-center.png" width="260" alt="Notification center">
+</p>
+
+<p align="center">
   <img src="docs/screenshots/inbox-approval.png" width="260" alt="Approval inbox">
   <img src="docs/screenshots/new-quest.png" width="260" alt="Assigning a new quest">
   <img src="docs/screenshots/icon-light.png" width="120" alt="App icon">
@@ -32,6 +38,8 @@ Instead of a flat list of jobs and logs, your AI agents live in a little anime v
 - **Human-in-the-loop approvals** — anything risky stops and waits for you. The agent walks to the Quest Board, the *Need You* counter pulses, and you approve or deny from the Inbox.
 - **Assign your own quests** — pick an agent, type a task (or choose a common one), optionally require approval before it finishes. Each agent has a visible queue.
 - **Dashboard panels** — Inbox, New Quest, Stats (per-agent work and usage), filterable Quest Log, Menu.
+- **Notifications** — animated banners with a light sweep, countdown and swipe-to-dismiss; approve or deny right from the banner; a notification center with unread badges; system notifications with Approve/Deny actions when the app is in the background; haptics.
+- **Animated loading screen** — arcade title, the agents running in, and a pixel-dissolve into the village while the world is generated on a background thread.
 - **Day/night cycle** — lanterns and windows light up, fireflies come out.
 - **Original chiptune audio** — a calm lo-fi loop and sound effects, synthesized in real time.
 

@@ -4,7 +4,7 @@ import SwiftUI
 struct AgentVillageApp: App {
     var body: some Scene {
         WindowGroup {
-            GameView()
+            RootView()
                 .preferredColorScheme(.dark)
         }
         #if os(macOS)
